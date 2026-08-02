@@ -1,0 +1,296 @@
+<!doctype html>
+<!-- Single-file offline annotation UI.
+     Offline, no dependencies. Load your CSV, label with the keyboard, Export writes the
+     SAME schema back (auth stays blank unless overridden): ingest.py unchanged.
+     Progress autosaves to localStorage per (file, item). CSV in Excel remains the fallback. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Question annotator</title>
+<style>
+  :root { --ink:#0b0b0b; --ink2:#52514e; --line:#e2e1dc; --accent:#2a78d6; --warn:#b45309;
+          --good:#166534; --bg:#fcfcfb; --card:#ffffff; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:15px/1.45 system-ui,sans-serif; color:var(--ink); background:var(--bg); }
+  header { display:flex; gap:12px; align-items:center; padding:10px 16px; border-bottom:1px solid var(--line);
+           position:sticky; top:0; background:var(--bg); z-index:2; flex-wrap:wrap; }
+  header .grow { flex:1; }
+  main { max-width:1180px; margin:0 auto; padding:16px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px 18px; margin-bottom:12px; }
+  .era { display:inline-block; font-size:12px; color:var(--ink2); border:1px solid var(--line);
+         border-radius:99px; padding:1px 10px; margin-bottom:8px; }
+  .q { font-size:20px; font-weight:600; margin:2px 0 10px; }
+  .src { font-size:13px; color:var(--ink2); word-break:break-all; }
+  .src a { color:var(--accent); }
+  .ctx { font-size:13px; color:var(--ink); background:#f6f5f1; border:1px solid var(--line); border-radius:8px;
+         padding:8px 11px; margin-top:8px; max-height:210px; overflow:auto; white-space:pre-wrap; line-height:1.5; }
+  .ctx mark { background:#fde68a; padding:0 1px; border-radius:2px; }
+  .ctx .none { color:var(--ink2); font-style:italic; }
+  .row { display:flex; gap:8px; align-items:center; margin:8px 0; flex-wrap:wrap; }
+  .lbl { width:110px; font-size:13px; color:var(--ink2); flex:none; }
+  button { font:inherit; font-size:14px; padding:5px 12px; border:1px solid var(--line); background:#fff;
+           border-radius:8px; cursor:pointer; color:var(--ink); }
+  button:hover { border-color:var(--accent); }
+  button.sel { background:var(--accent); border-color:var(--accent); color:#fff; }
+  button.sel.warn { background:var(--warn); border-color:var(--warn); }
+  .cue.active { outline:2px solid var(--accent); outline-offset:2px; border-radius:10px; }
+  .auth { font-weight:600; }
+  .auth.g { color:var(--good); } .auth.m { color:var(--warn); } .auth.u { color:var(--ink2); }
+  .corrected::after { content:" ✎"; color:var(--warn); }
+  .hint { font-size:12.5px; color:var(--ink2); }
+  .cols { display:flex; gap:16px; align-items:flex-start; }
+  .labelcol { flex:1; min-width:0; }
+  .refcol { width:308px; flex:none; position:sticky; top:62px; }
+  .ref-panel { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px 16px;
+               font-size:12.5px; color:var(--ink2); line-height:1.5; }
+  .ref-panel h4 { margin:0 0 6px; font-size:11.5px; text-transform:uppercase; letter-spacing:.05em; color:var(--ink2); }
+  .ref-panel p { margin:9px 0; }
+  .ref-panel b { color:var(--ink); }
+  @media (max-width:860px){ .cols{ flex-direction:column; } .refcol{ width:auto; position:static; } }
+  input[type=text] { font:inherit; padding:5px 8px; border:1px solid var(--line); border-radius:8px; width:100%; }
+  .nav { display:flex; gap:8px; align-items:center; }
+  progress { width:180px; height:10px; }
+  .done { color:var(--good); font-weight:600; }
+  kbd { background:#f1f0ec; border:1px solid var(--line); border-bottom-width:2px; border-radius:4px;
+        padding:0 5px; font-size:12px; }
+  #load { padding:40px; text-align:center; color:var(--ink2); }
+</style>
+</head>
+<body>
+<header>
+  <strong>Question annotator</strong>
+  <span id="fname" class="hint"></span>
+  <span class="grow"></span>
+  <span id="count" class="hint"></span>
+  <progress id="prog" value="0" max="1"></progress>
+  <span class="nav">
+    <button id="prev" title="←">←</button>
+    <button id="next" title="Enter / →">→</button>
+    <button id="jump" title="first unfinished">⇥ next unfinished</button>
+    <button id="export">Export CSV</button>
+  </span>
+</header>
+<main>
+  <div id="load" class="card">
+    <p><strong>Load your CSV</strong> (e.g. <code>&lt;you&gt;.csv</code>)</p>
+    <input type="file" id="file" accept=".csv">
+    <p class="hint">Keys: <kbd>y</kbd>/<kbd>n</kbd>/<kbd>?</kbd> fill the highlighted cue (community → templated →
+    personal) · <kbd>Enter</kbd>/<kbd>→</kbd> next · <kbd>←</kbd> prev · <kbd>Backspace</kbd> clear last cue ·
+    <kbd>g</kbd>/<kbd>m</kbd>/<kbd>u</kbd> override auth · <kbd>!</kbd> flag uncertain.
+    Progress autosaves locally; Export writes the CSV to return.
+    Every cue and label is defined on the labeling page; no separate guide needed.</p>
+  </div>
+  <div id="app" style="display:none">
+   <div class="cols">
+    <div class="labelcol">
+    <div class="card">
+      <span class="era" id="era"></span>
+      <div class="q" id="question"></div>
+      <div class="src"><span id="host"></span> · <a id="url" href="#" target="_blank" rel="noopener">open page ↗</a></div>
+      <div class="hint" style="margin-top:8px;margin-bottom:2px">Page as crawled: judge from this (question in «highlight»):</div>
+      <div class="ctx" id="pagectx"></div>
+    </div>
+    <div class="card" id="cuecard">
+      <div class="hint" style="margin-bottom:8px">Answer 3 cues → authenticity auto-derives:
+        <b>templated → manufactured</b>; else <b>community or personal → genuine</b>; else <b>unclear</b>
+        (any <kbd>?</kbd> → unclear).</div>
+      <div class="row cue" id="cue-c"><span class="lbl">community (c)</span></div>
+      <div class="row cue" id="cue-t"><span class="lbl">templated (t)</span></div>
+      <div class="row cue" id="cue-p"><span class="lbl">personal (p)</span></div>
+      <div class="row"><span class="lbl">→ authenticity</span>
+        <span id="auth" class="auth"></span><span class="hint" id="authnote"></span>
+        <span style="flex:1"></span>
+        <span class="hint">override:</span><span id="authov"></span></div>
+    </div>
+    <div class="card">
+      <div class="hint" style="margin-bottom:6px">Classifier guesses: <b>edit only if wrong</b>
+        (scaffolding + person: quick check · type: glance)</div>
+      <div class="row"><span class="lbl" id="l-provenance">provenance</span><span id="g-provenance"></span></div>
+      <div class="row"><span class="lbl" id="l-scaffolding">scaffolding</span><span id="g-scaffolding"></span></div>
+      <div class="row"><span class="lbl" id="l-person">person</span><span id="g-person"></span></div>
+      <div class="row"><span class="lbl" id="l-type">type</span><span id="g-type"></span></div>
+    </div>
+    <div class="card">
+      <div class="row"><span class="lbl">flag (!)</span><span id="g-flag"></span>
+        <input type="text" id="notes" placeholder="notes (why you overrode / what's odd)"></div>
+    </div>
+    </div><!-- /labelcol -->
+    <aside class="refcol">
+      <div class="ref-panel">
+        <h4>Cues</h4>
+        <p><b>community (c)</b>: the <b>host</b>, not whether it sounds human: forum/board, comments,
+        Q&amp;A (reddit, StackExchange), mailing list → <b>y</b>; an article / interview / blog <b>post</b>
+        → <b>n</b>; a reader <b>comment or reply</b> → <b>y</b>.</p>
+        <p><b>templated (t)</b>: a <b>canned/boilerplate unit</b> (FAQ/PAA answer, SEO/marketing question,
+        one of a mass-published list). <b>Generic wording ≠ templated</b>: a reader's forum/comment post is
+        <b>n</b> even if plainly worded. If <b>community=y</b>, templated is almost always <b>n</b>. Bespoke
+        interview / op-ed / rhetorical → <b>n</b>.</p>
+        <p><b>personal (p)</b>: first-person, or about the asker's <b>own</b> situation ("how do I fix
+        <b>my</b> 2012 Civic?") → <b>y</b>; otherwise <b>n</b>.</p>
+        <h4 style="margin-top:12px">Labels</h4>
+        <p><b>provenance</b>: where the question lives:<br>
+        <b>genuine-UGC</b>: forum/board, comment thread, Q&amp;A community, mailing list<br>
+        <b>manufactured-template</b>: a canonical question duplicated across many sites (FAQ/PAA/SEO)<br>
+        <b>commerce-faq</b>: a shop or support/FAQ site's own Q&amp;A<br>
+        <b>editorial</b>: news / blog / magazine / article / interview content<br>
+        <b>unknown</b>: can't place it.</p>
+        <p><b>type</b>: grammatical form:<br>
+        <b>wh</b>: who/what/when/where/why/which/how<br>
+        <b>polar</b>: yes/no, auxiliary-first ("Is it…?", "Do you…?")<br>
+        <b>tag</b>: statement + tag ("…, right?", "…, isn't it?")<br>
+        <b>imperative-interrogative</b>: a command-style request ("tell me…", "explain…")<br>
+        <b>elliptical</b>: no verb ("best way to X?", "reason for Y?")<br>
+        <b>other</b>: none of these.</p>
+        <p><b>person</b>: <b>first</b> (I / we) · <b>second</b> (you) · <b>impersonal</b> (neither).</p>
+        <p><b>scaffolding</b>: <b>y</b> = extra context around the question: more than one sentence, a
+        background clause, or politeness ("I have a 2012 Civic that won't start. How do I fix it?");
+        <b>n</b> = a bare question.</p>
+      </div>
+    </aside>
+   </div><!-- /cols -->
+  </div>
+</main>
+<script>
+"use strict";
+/* ---------- CSV (RFC-ish: quoted fields, embedded commas/quotes/newlines) ---------- */
+function parseCSV(text) {
+  const rows = []; let row = [], field = "", inQ = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQ) {
+      if (c === '"') { if (text[i+1] === '"') { field += '"'; i++; } else inQ = false; }
+      else field += c;
+    } else if (c === '"') inQ = true;
+    else if (c === ',') { row.push(field); field = ""; }
+    else if (c === '\n' || c === '\r') {
+      if (c === '\r' && text[i+1] === '\n') i++;
+      row.push(field); field = ""; rows.push(row); row = [];
+    } else field += c;
+  }
+  if (field !== "" || row.length) { row.push(field); rows.push(row); }
+  return rows;
+}
+function csvField(s) {
+  s = s == null ? "" : String(s);
+  return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+function toCSV(rows) { return rows.map(r => r.map(csvField).join(",")).join("\r\n") + "\r\n"; }
+function esc(s){return String(s==null?"":s).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));}
+function deriveAuth(c, t, p) {
+  if (!c || !t || !p) return "";
+  if (t === "y") return "m";
+  if (c === "y" || p === "y") return "g";
+  return "u";
+}
+/* ---------- app ---------- */
+if (typeof document !== "undefined") (() => {
+const VOCAB = {
+  provenance: ["genuine-UGC","manufactured-template","commerce-faq","editorial","unknown"],
+  type: ["wh","polar","tag","imperative-interrogative","elliptical","other"],
+  person: ["first","second","impersonal"],
+  scaffolding: ["y","n"],
+};
+const AUTHN = { g:"genuine", m:"manufactured", u:"unclear" };
+let comment = "", header = [], items = [], idx = 0, fileName = "annotations.csv", prefill = {};
+const $ = id => document.getElementById(id);
+const col = name => header.indexOf(name);
+const store = () => localStorage.setItem("annot:" + fileName, JSON.stringify(items));
+const cur = () => items[idx];
+const get = (it, name) => it[col(name)] || "";
+const set = (name, val) => { cur()[col(name)] = val; store(); render(); };
+const complete = it => get(it,"c") && get(it,"t") && get(it,"p");
+
+function btn(txt, sel, on, cls) {
+  const b = document.createElement("button");
+  b.textContent = txt; if (sel) b.classList.add("sel"); if (cls) b.classList.add(cls);
+  b.onclick = on; return b;
+}
+function cueRow(id, name, opts) {
+  const el = $(id); [...el.querySelectorAll("button")].forEach(b => b.remove());
+  for (const o of opts) el.appendChild(btn(o, get(cur(), name) === o, () => set(name, o)));
+}
+function group(name) {
+  const el = $("g-" + name); el.innerHTML = "";
+  const val = get(cur(), name);
+  for (const o of VOCAB[name]) el.appendChild(btn(o, val === o, () => set(name, o)));
+  const pf = prefill[get(cur(),"item_id")] || {};
+  $("l-" + name).classList.toggle("corrected", pf[name] !== undefined && val !== pf[name]);
+}
+function activeCue() { for (const c of ["c","t","p"]) if (!get(cur(), c)) return c; return null; }
+function render() {
+  const it = cur(); if (!it) return;
+  $("era").textContent = get(it,"era");
+  $("question").textContent = get(it,"question");
+  $("host").textContent = get(it,"host");
+  $("url").href = get(it,"url");
+  const ctx = get(it,"page_context");
+  $("pagectx").innerHTML = ctx ? esc(ctx).replace("«","<mark>").replace("»","</mark>")
+                               : '<span class="none">(no page content stored)</span>';
+  cueRow("cue-c","c",["y","n","?"]); cueRow("cue-t","t",["y","n","?"]); cueRow("cue-p","p",["y","n"]);
+  const act = activeCue();
+  for (const c of ["c","t","p"]) $("cue-"+c).classList.toggle("active", c === act);
+  const ov = get(it,"auth"), auto = deriveAuth(get(it,"c"),get(it,"t"),get(it,"p"));
+  const eff = ov || auto;
+  $("auth").textContent = eff ? AUTHN[eff] : "-";
+  $("auth").className = "auth " + eff;
+  $("authnote").textContent = ov ? " (override)" : (auto ? " (auto from cues)" : "  finish the cues");
+  const el = $("authov"); el.innerHTML = "";
+  for (const o of ["g","m","u"]) el.appendChild(btn(AUTHN[o], ov === o, () => set("auth", ov === o ? "" : o), "warn"));
+  for (const g of ["provenance","scaffolding","person","type"]) group(g);
+  const f = $("g-flag"); f.innerHTML = "";
+  f.appendChild(btn("uncertain", get(it,"flag") === "u", () => set("flag", get(it,"flag") === "u" ? "" : "u"), "warn"));
+  $("notes").value = get(it,"notes");
+  const done = items.filter(complete).length;
+  $("count").innerHTML = `item ${idx+1}/${items.length} · <span class="${done===items.length?'done':''}">${done} done</span>`;
+  $("prog").value = done; $("prog").max = items.length;
+}
+function go(d) { idx = Math.max(0, Math.min(items.length - 1, idx + d)); render(); }
+$("prev").onclick = () => go(-1); $("next").onclick = () => go(1);
+$("jump").onclick = () => { const i = items.findIndex(x => !complete(x)); if (i >= 0) idx = i; render(); };
+$("notes").oninput = e => { cur()[col("notes")] = e.target.value; store(); };
+$("export").onclick = () => {
+  const miss = items.filter(x => !complete(x)).length;
+  if (miss && !confirm(miss + " item(s) still missing cues; export anyway?")) return;
+  const out = (comment ? comment + "\r\n" : "") + toCSV([header, ...items]);
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([out], {type:"text/csv"}));
+  a.download = fileName; a.click();
+};
+document.addEventListener("keydown", e => {
+  if (e.target.tagName === "INPUT" && e.target.type === "text") { if (e.key === "Escape") e.target.blur(); return; }
+  if ($("app").style.display === "none") return;
+  const k = e.key;
+  if (k === "Enter" || k === "ArrowRight") { go(1); e.preventDefault(); }
+  else if (k === "ArrowLeft") go(-1);
+  else if (k === "Backspace") { for (const c of ["p","t","c"]) if (get(cur(), c)) { set(c, ""); break; } e.preventDefault(); }
+  else if (k === "!") set("flag", get(cur(),"flag") === "u" ? "" : "u");
+  else if (["g","m","u"].includes(k) && !activeCue()) set("auth", get(cur(),"auth") === k ? "" : k);
+  else if (["y","n","?"].includes(k)) {
+    const c = activeCue();
+    if (c && !(c === "p" && k === "?")) { set(c, k); if (!activeCue()) $("next").focus(); }
+  }
+});
+$("file").onchange = ev => {
+  const f = ev.target.files[0]; if (!f) return;
+  fileName = f.name;
+  f.text().then(text => {
+    let body = text;
+    if (body.startsWith("#")) { const nl = body.indexOf("\n"); comment = body.slice(0, nl).replace(/\r$/,""); body = body.slice(nl + 1); }
+    const rows = parseCSV(body).filter(r => r.length > 1);
+    header = rows[0]; items = rows.slice(1);
+    for (const it of items) {
+      const pf = {}; for (const g of Object.keys(VOCAB)) pf[g] = it[col(g)];
+      prefill[it[col("item_id")]] = pf;
+    }
+    const saved = localStorage.getItem("annot:" + fileName);
+    if (saved) { const s = JSON.parse(saved); if (s.length === items.length && confirm("Resume saved progress for " + fileName + "?")) items = s; }
+    $("load").style.display = "none"; $("app").style.display = "";
+    $("fname").textContent = fileName; idx = 0;
+    $("jump").click();
+  });
+};
+})();
+if (typeof module !== "undefined") module.exports = { parseCSV, toCSV, csvField, deriveAuth };
+</script>
+</body>
+</html>

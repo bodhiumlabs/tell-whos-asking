@@ -1,0 +1,16 @@
+pclass,label,n,share_within_pclass
+commerce-faq,conversational-fragment,9217,0.325896
+commerce-faq,context-dependent,2360,0.083445
+commerce-faq,self-contained,16705,0.590658
+editorial,conversational-fragment,88349,0.364426
+editorial,context-dependent,32980,0.136038
+editorial,self-contained,121104,0.499536
+genuine-UGC,conversational-fragment,28950,0.316566
+genuine-UGC,context-dependent,16966,0.185522
+genuine-UGC,self-contained,45534,0.497911
+manufactured-template,conversational-fragment,164435,0.414980
+manufactured-template,context-dependent,47833,0.120715
+manufactured-template,self-contained,183980,0.464305
+unknown,conversational-fragment,549829,0.381405
+unknown,context-dependent,156466,0.108537
+unknown,self-contained,735292,0.510057

@@ -1,0 +1,2 @@
+spacy>=3.8,<4
+# model (installed separately): python -m spacy download en_core_web_sm
