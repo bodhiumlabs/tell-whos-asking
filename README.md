@@ -1,8 +1,12 @@
 # You Can Tell Who's Asking
 
-**What the Web's Questions Are Made Of, and Where They Come From**
+### What the Web's Questions Are Made Of, and Where They Come From
+
+[![arXiv](https://img.shields.io/badge/arXiv-2609.24106-b31b1b.svg)](https://arxiv.org/abs/2609.24106)
+[![Venue](https://img.shields.io/badge/WaC--13-EMNLP%202026-4b44ce.svg)](https://aclanthology.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 Calvin Zhou, Vincent McCloskey, Krishna Srinivasan
-WaC-13, EMNLP 2026
 
 Code and data for the paper.
 
